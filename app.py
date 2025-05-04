@@ -1,8 +1,11 @@
 import streamlit as st
 import pandas as pd
-import joblib
 import matplotlib.pyplot as plt
+import os
+import sys
+import traceback
 
+# Configure page
 st.set_page_config(page_title="Stock Trend Predictor", layout="centered")
 
 st.title("📈 Next-Day Stock Trend Predictor")
@@ -16,7 +19,7 @@ if input_method == "Manual Input":
     volume = st.number_input("Today's volume:", min_value=0.0)
     volatility = st.slider("Volatility (0–1):", 0.0, 1.0, step=0.01)
     lag1_return = st.number_input("Lag 1 Return (%):", step=0.01)
-
+    
     input_df = pd.DataFrame([{
         "close": close_price,
         "volume": volume,
@@ -30,20 +33,49 @@ elif input_method == "Upload CSV":
     else:
         input_df = None
 
+def load_model_safely():
+    """Load the model with error handling for version compatibility issues"""
+    try:
+        import joblib
+        model = joblib.load("rf_model.pkl")
+        return model, None
+    except ValueError as e:
+        if "numpy.dtype size changed" in str(e):
+            error_msg = (
+                "⚠️ NumPy version incompatibility detected. This typically happens when the model was "
+                "created with a different NumPy version than what's installed on Streamlit Cloud. "
+                "Please try re-training your model in an environment with matching package versions."
+            )
+        else:
+            error_msg = f"⚠️ Error loading model: {str(e)}"
+        return None, error_msg
+    except Exception as e:
+        return None, f"⚠️ Error loading model: {str(e)}"
+
 if st.button("📊 Predict Next-Day Trend"):
     if input_df is not None and not input_df.empty:
-        model = joblib.load("rf_model.pkl")
-        prediction = model.predict(input_df)
-        st.success(f"📉 Predicted Trend: **{prediction[0]}**")
-
-        st.subheader("🔍 Feature Importances")
-        importances = model.feature_importances_
-        features = input_df.columns
-        fig, ax = plt.subplots()
-        ax.barh(features, importances)
-        ax.set_xlabel("Importance")
-        ax.set_title("Feature Importance")
-        st.pyplot(fig)
+        try:
+            with st.spinner("Loading model and making prediction..."):
+                model, error = load_model_safely()
+                
+                if error:
+                    st.error(error)
+                    st.info("💡 Solution: Try uploading a model trained with the same packages specified in requirements.txt")
+                else:
+                    prediction = model.predict(input_df)
+                    st.success(f"📉 Predicted Trend: **{prediction[0]}**")
+                    
+                    st.subheader("🔍 Feature Importances")
+                    importances = model.feature_importances_
+                    features = input_df.columns
+                    fig, ax = plt.subplots()
+                    ax.barh(features, importances)
+                    ax.set_xlabel("Importance")
+                    ax.set_title("Feature Importance")
+                    st.pyplot(fig)
+        except Exception as e:
+            st.error(f"⚠️ An error occurred: {str(e)}")
+            st.code(traceback.format_exc())
     else:
         st.warning("⚠️ Please provide valid input data.")
 
